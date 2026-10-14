@@ -1,0 +1,57 @@
+name: Build Jash Media Player APK
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Create keystore if missing
+        run: |
+          if [ ! -f "app/jash-release-key.jks" ]; then
+            keytool -genkeypair -v -keystore app/jash-release-key.jks \
+              -alias jashkey -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass jashplayer123 -keypass jashplayer123 \
+              -dname "CN=Jash Media Player, O=Jash, C=AE"
+          fi
+
+      - name: Build APKs
+        run: gradle assembleDebug assembleRelease --stacktrace
+
+      - name: Rename APKs
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk dist/Jash-Media-Player-Release.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/Jash-Media-Player-Debug.apk
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jash-Media-Player-APKs
+          path: dist/*.apk
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Jash Media Player v1.0.${{ github.run_number }}
+          files: dist/*.apk
