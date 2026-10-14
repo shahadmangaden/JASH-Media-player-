@@ -14,29 +14,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Unpack project zip
+      - name: Locate Android project
+        id: project
         run: |
-          if [ ! -f settings.gradle.kts ] && [ ! -f settings.gradle ]; then
-            mkdir -p /tmp/src
-            for z in *.zip; do unzip -o -q "$z" -d /tmp/src; done
-            s=$(find /tmp/src -name 'settings.gradle*' -not -path '*/build/*' | head -1)
-            if [ -z "$s" ]; then echo "No Android project found in zip"; exit 1; fi
-            cp -r "$(dirname "$s")"/. .
+          has_project=false
+          if [ -f settings.gradle.kts ] || [ -f settings.gradle ]; then
+            has_project=true
+          else
+            shopt -s nullglob
+            archives=( *.zip )
+            if [ ${#archives[@]} -gt 0 ]; then
+              mkdir -p /tmp/src
+              for archive in "${archives[@]}"; do unzip -o -q "$archive" -d /tmp/src; done
+              settings_file=$(find /tmp/src -name 'settings.gradle*' -not -path '*/build/*' -print -quit)
+              if [ -n "$settings_file" ]; then
+                cp -r "$(dirname "$settings_file")"/. .
+                has_project=true
+              fi
+            fi
           fi
-          ls -la
+          echo "android_project=$has_project" >> "$GITHUB_OUTPUT"
+          if [ "$has_project" = true ]; then
+            ls -la
+          else
+            echo "::notice::No Android Gradle project or ZIP archive found; skipping APK build."
+          fi
 
       - name: Set up JDK 17
+        if: steps.project.outputs.android_project == 'true'
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
       - name: Set up Gradle 8.9
+        if: steps.project.outputs.android_project == 'true'
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
       - name: Create keystore if missing
+        if: steps.project.outputs.android_project == 'true'
         run: |
           if [ ! -f "app/jash-release-key.jks" ]; then
             keytool -genkeypair -v -keystore app/jash-release-key.jks \
@@ -46,21 +64,25 @@ jobs:
           fi
 
       - name: Build APKs
+        if: steps.project.outputs.android_project == 'true'
         run: gradle assembleDebug assembleRelease --stacktrace
 
       - name: Rename APKs
+        if: steps.project.outputs.android_project == 'true'
         run: |
           mkdir -p dist
           cp app/build/outputs/apk/release/app-release.apk dist/Jash-Media-Player-Release.apk
           cp app/build/outputs/apk/debug/app-debug.apk dist/Jash-Media-Player-Debug.apk
 
       - name: Upload APKs
+        if: steps.project.outputs.android_project == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: Jash-Media-Player-APKs
           path: dist/*.apk
 
       - name: Publish GitHub Release
+        if: steps.project.outputs.android_project == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
